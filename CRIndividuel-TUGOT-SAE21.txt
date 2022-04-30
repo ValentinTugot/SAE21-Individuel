@@ -1,0 +1,122 @@
+J'ai effectué toute la partie du réseau sur GNS3 durant la SAE, voici un résumé des commandes effectués:
+
+## Configuration des PC et des Switch -> Graphique
+4 Vlan crées :
+VLAN10 -> Administratifs (Access)
+VLAN20 -> Commerciaux (Access)
+VLAN30 -> SI (Access)
+VLAN1 -> Routeur et autres. (Trunk)
+
+## Configuration du serveur DHCP : 
+J'ai décidé de mettre le serveur DHCP sur le routeur, car j'ai eu du mal à trouver des images GNS3 adéquat et que cette solution semblait simple et efficace.
+
+# On exclue les addresses IP du routeur de chaque VLAN du pool d'addresses : 
+
+> conf t
+> ip dhcp excluded-address 192.168.1.254
+> ip dhcp excluded-address 192.168.10.254
+> ip dhcp excluded-address 192.168.20.254
+> ip dhcp excluded-address 192.168.30.254
+
+# On crée les pool d'addresses pour chaque VLAN : 
+
+VLAN1:
+> ip dhcp pool Pool1 
+   >> network 192.168.1.0 255.255.255.0
+   >> default-router 192.168.1.254 
+
+VLAN10:
+> ip dhcp pool vlan10
+   >> network 192.168.10.0 255.255.255.0
+   >> default-router 192.168.10.254 
+   >> dns-server 8.8.8.8 
+
+VLAN20:
+> ip dhcp pool vlan20
+  >> network 192.168.20.0 255.255.255.0
+  >> default-router 192.168.20.254 
+  >> dns-server 8.8.8.8 
+
+VLAN30:
+> ip dhcp pool vlan30
+   >> network 192.168.30.0 255.255.255.0
+   >> default-router 192.168.30.254 
+   >> dns-server 8.8.8.8 
+
+## Configuration du Router
+
+# L'addressage est en 192.168.VLAN.0/24
+# Gestion des interfaces pour les VLAN :
+
+VLAN1:
+> interface FastEthernet0/0
+ >> ip address 192.168.1.254 255.255.255.0
+
+VLAN10:
+> interface FastEthernet0/0.10
+ >> encapsulation dot1Q 10
+ >> ip address 192.168.10.254 255.255.255.0
+
+VLAN20:
+>interface FastEthernet0/0.20
+ >> encapsulation dot1Q 20
+ >> ip address 192.168.20.254 255.255.255.0
+
+VLAN30:
+> interface FastEthernet0/0.30
+ >> encapsulation dot1Q 30
+ >> ip address 192.168.30.254 255.255.255.0
+
+# Interface relié à Internet (Addressage en 10.214.0.0/16)
+
+> interface FastEthernet0/1
+ >> ip address 10.214.0.1 255.255.0.0
+
+# Configuration des ACL pour les règles entre les VLAN :
+# Les VLAN 10 et 20 ne peuvent pas communiquer avec les autres, le VLAN30 peut communiquer avec toute le monde :
+
+- VLAN10 (On retire tout les paquets venant du VLAN20):
+> ip access-list extended vlan10
+ >> deny   ip 192.168.20.0 0.0.0.255 192.168.10.0 0.0.0.255
+ >> permit ip any any
+
+# On ajoute à l'interface la règle pour les paquets venant de l'exterieur du VLAN :
+> interface FastEthernet0/0.10
+  >> ip access-group vlan10 out
+
+- VLAN20 (On retire tout les paquets venant du VLAN10):
+> ip access-list extended vlan20
+ >> deny   ip 192.168.10.0 0.0.0.255 192.168.20.0 0.0.0.255
+ >> permit ip any any
+
+# On ajoute à l'interface la règle pour les paquets venant de l'exterieur du VLAN :
+> interface FastEthernet0/0.20
+  >> ip access-group vlan20 out
+
+# Il faut cree la règles permettant au VLAN30 d'accéder a toutes les machines,
+# Il faut donc autorisé au VLAN10 et 20 de pouvoir répondre au PING, et au requètes TCP deja établi pour accepter le SSH.
+
+VLAN10:
+> ip access-list extended vlan30to10
+ >> permit icmp 192.168.10.0 0.0.0.255 192.168.30.0 0.0.0.255 echo-reply // Autorise les réponses au ping
+ >> permit tcp 192.168.10.0 0.0.0.255 192.168.30.0 0.0.0.255 established // Autorise les connexions TCP établi
+ >> deny   ip 192.168.10.0 0.0.0.255 192.168.30.0 0.0.0.255 // Empeche le VLAN10 de communiquer avec le VLAN30
+ >> permit ip any any
+
+# On ajoute la règle sur l'interface pour tout les paquets sortant du VLAN10 :
+> interface FastEthernet0/0.10
+  >> ip access-group vlan30to10 in
+
+VLAN20:
+> ip access-list extended vlan30to20
+ >> permit icmp 192.168.20.0 0.0.0.255 192.168.30.0 0.0.0.255 echo-reply
+ >> permit tcp 192.168.20.0 0.0.0.255 192.168.30.0 0.0.0.255 established
+ >> deny   ip 192.168.20.0 0.0.0.255 192.168.30.0 0.0.0.255
+ >> permit ip any any
+
+# On ajoute la règle sur l'interface pour tout les paquets sortant du VLAN20 :
+> interface FastEthernet0/0.20
+  >> ip access-group vlan30to10 in
+
+
+
